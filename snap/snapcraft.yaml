@@ -1,0 +1,28 @@
+name: sphere  
+version: '0.1.0'
+summary: The motechat sphere system
+description: |
+  The base compoment for motechat.
+
+grade: devel # must be 'stable' to release into candidate/stable channels
+confinement: devmode # use 'strict' once you have the right plugs and slots
+
+apps:
+  motebus:
+    command: motebus
+    plugs: [ network-bind ]
+    daemon: simple
+  dc:
+    command: node dc.js
+    plugs: [ network-bind ]
+    daemon: simple
+
+parts:
+  motebus:
+    plugin: dump
+    source: motebus
+
+  dc:
+    plugin: nodejs
+    source: dc
+    node-engine: 8.11.3
