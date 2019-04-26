@@ -1,5 +1,5 @@
 name: sphere  
-version: '0.1.0'
+version: '0.1.1'
 summary: The motechat sphere system
 description: |
   The base compoment for motechat.
@@ -25,4 +25,4 @@ parts:
   dc:
     plugin: nodejs
     source: dc
-    node-engine: 8.11.3
+    node-engine: 10.15.3

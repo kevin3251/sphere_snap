@@ -1,13 +1,15 @@
 {
   "name": "dc",
-  "version": "0.0.1",
+  "version": "1.4.0",
   "description": "The motechat dcenter",
   "main": "index.js",
   "license": "MIT",
-  "dependencies": {
-    "motebus": "1.0.7"
+  "scripts": {
+    "build": "yarn install",
+    "dc": "node dc.js"
   },
-  "devDependencies": {
-
-  }
+  "dependencies": {
+    "motebus": "1.0.9"
+  },
+  "devDependencies": {}
 }
