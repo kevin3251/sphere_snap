@@ -1,4 +1,4 @@
-#!$SNAP/bin/node
+#!/usr/bin/env node
 
 // dcenter: proxy of ucenter and relay center
 // Date: 2018/03/08

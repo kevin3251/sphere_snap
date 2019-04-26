@@ -13,7 +13,7 @@ apps:
     plugs: [ network-bind ]
     daemon: simple
   dc:
-    command: npx dc
+    command: bin/dc
     plugs: [ network-bind ]
     daemon: simple
 
