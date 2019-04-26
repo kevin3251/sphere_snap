@@ -3,6 +3,7 @@
   "version": "1.4.0",
   "description": "The motechat dcenter",
   "main": "index.js",
+  "bin": "./dc.js",
   "license": "MIT",
   "scripts": {
     "build": "yarn install",

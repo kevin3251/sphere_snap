@@ -13,7 +13,7 @@ apps:
     plugs: [ network-bind ]
     daemon: simple
   dc:
-    command: node dc.js
+    command: npx dc
     plugs: [ network-bind ]
     daemon: simple
 
