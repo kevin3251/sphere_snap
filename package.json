@@ -6,5 +6,8 @@
   "license": "MIT",
   "devDependencies": {
     "gulp": "^4.0.1"
+  },
+  "dependencies": {
+    "axios": "^0.18.0"
   }
 }

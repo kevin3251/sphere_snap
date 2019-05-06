@@ -1,5 +1,5 @@
-const https = require('https')
 const fs = require('fs')
+const axios = require('axios')
 const { src, dest, series } = require('gulp')
 
 const targets = {
@@ -9,8 +9,8 @@ const targets = {
     'arm': 'mbStack_LARM'
 }
 
-const defaultTask = () => new Promise((resolve, reject) => {
-    
+const defaultTask = () => new Promise(async (resolve, reject) => {
+
     const arch = process.env.SNAPCRAFT_ARCH_TRIPLET || process.env.ARCH
     console.log(arch)
     const target = targets[arch]
@@ -21,22 +21,14 @@ const defaultTask = () => new Promise((resolve, reject) => {
     }
 
     const file = fs.createWriteStream("motebus")
-    const request = https.get(
-        `https://github.com/motebus/motebus/releases/latest/download/${target}`,
-        (resp) => {
-            resp.pipe(file)
-        }
-    )
+    const url = `https://github.com/motebus/motebus/releases/latest/download/${target}`
+    const resp = await axios.get(url, { responseType: 'stream' })
+    resp.data.pipe(file)
 
     file.on('finish', () => {
         file.close()
         fs.chmodSync('motebus', '755')
         resolve()
-    })
-
-    request.on('error', (err) => {
-        fs.unlink('motebus')
-        reject(err)
     })
 
     file.on('error', (err) => {

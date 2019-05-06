@@ -23,7 +23,7 @@ parts:
     source: .
     node-engine: 10.15.3
     gulp-tasks:
-      - default
+      - install
 
   dc:
     plugin: nodejs
