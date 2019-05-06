@@ -19,8 +19,11 @@ apps:
 
 parts:
   motebus:
-    plugin: dump
-    source: motebus
+    plugin: gulp
+    source: .
+    node-engine: 10.15.3
+    gulp-tasks:
+      - default
 
   dc:
     plugin: nodejs
