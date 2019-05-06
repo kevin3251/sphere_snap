@@ -1,0 +1,10 @@
+{
+  "name": "sphere_snap",
+  "version": "0.1.2",
+  "main": "index.js",
+  "repository": "https://github.com/motebus/sphere_snap.git",
+  "license": "MIT",
+  "devDependencies": {
+    "gulp": "^4.0.1"
+  }
+}

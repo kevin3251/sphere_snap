@@ -1,0 +1,7 @@
+parts
+prime
+stage
+sphere_*
+motebus
+snap/.snapcraft
+node_modules
