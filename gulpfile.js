@@ -6,7 +6,8 @@ const targets = {
     'arm-linux-gnu': 'mbStack_LARM',
     'x86_64-linux-gnu': 'mbStack_L64',
     'amd64': 'mbStack_L64',
-    'arm': 'mbStack_LARM'
+    'arm': 'mbStack_LARM',
+    'arm-linux-gnueabihf': 'mbStack_LARM'
 }
 
 const defaultTask = () => new Promise(async (resolve, reject) => {
