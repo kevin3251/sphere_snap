@@ -1,6 +1,6 @@
 const https = require('https')
 const fs = require('fs')
-const { src, dest } = require('gulp')
+const { src, dest, series } = require('gulp')
 
 const targets = {
     'arm-linux-gnu': 'mbStack_LARM',
@@ -9,16 +9,15 @@ const targets = {
     'arm': 'mbStack_LARM'
 }
 
-async function defaultTask() {
-
+const defaultTask = () => new Promise((resolve, reject) => {
+    
     const arch = process.env.SNAPCRAFT_ARCH_TRIPLET || process.env.ARCH
     console.log(arch)
     const target = targets[arch]
 
-
     if (!target) {
         let error = new Error("Not such target!!!")
-        throw error
+        reject(error)
     }
 
     const file = fs.createWriteStream("motebus")
@@ -32,13 +31,19 @@ async function defaultTask() {
     file.on('finish', () => {
         file.close()
         fs.chmodSync('motebus', '755')
+        resolve()
     })
 
-    request.on('error', (err) => { fs.unlink('motebus') })
-    file.on('error', (err) => { fs.unlink('motebus') })
+    request.on('error', (err) => {
+        fs.unlink('motebus')
+        reject(err)
+    })
 
-    return
-}
+    file.on('error', (err) => {
+        fs.unlink('motebus')
+        reject(err)
+    })
+})
 
 function install() {
     return src('motebus')
@@ -46,4 +51,4 @@ function install() {
 }
 
 exports.default = defaultTask
-exports.install = install
+exports.install = series(defaultTask, install)
