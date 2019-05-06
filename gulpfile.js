@@ -1,5 +1,6 @@
 const https = require('https')
 const fs = require('fs')
+const { src, dest } = require('gulp')
 
 const targets = {
     'arm-linux-gnu': 'mbStack_LARM',
@@ -10,10 +11,10 @@ const targets = {
 
 async function defaultTask() {
 
-    const target = targets[
-        process.env.SNAPCRAFT_ARCH_TRIPLET ||
-        process.env.ARCH
-    ]
+    const arch = process.env.SNAPCRAFT_ARCH_TRIPLET || process.env.ARCH
+    console.log(arch)
+    const target = targets[arch]
+
 
     if (!target) {
         let error = new Error("Not such target!!!")
@@ -39,4 +40,10 @@ async function defaultTask() {
     return
 }
 
+function install() {
+    return src('motebus')
+        .pipe(dest('../install'))
+}
+
 exports.default = defaultTask
+exports.install = install
