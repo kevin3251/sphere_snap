@@ -1,8 +1,9 @@
 {
     "AppName":"dc",
-    "IOC":"ioc@202.153.173.253:6789",
+    "IOC":"ioc@ioc.ypcloud.com:6789",
     "UCenter":"uc@uc.ypcloud.com:6789",
     "MotebusGW":"127.0.0.1",
     "MotebusPort":6161,
-    "UplinkDC":""
+    "UplinkDC":"",
+    "Log":false
 }

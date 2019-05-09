@@ -1,11 +1,11 @@
 // session: module for session
-// Date: 2019/03/21
-// Version: 1.3
+// Date: 2019/04/29
+// Version: 1.4.2
 // Update:
 // Add EndSession
 
 var exports = module.exports = {};
-const ver = '1.1.20190424';
+const ver = '1.4.2.20190429';
 var regtable = [];
 var fwdq = [];
 var eicache = [];
@@ -21,7 +21,7 @@ var AuthKey = '';
 var firstStart = true;
 var snState = '';
 var dcState = '';
-var sdbg = 0;
+var sdbg = 1;
 var err;
 var iocmma = '';
 var updc = [];
@@ -239,7 +239,10 @@ exports.StartSession = function(EiUDID, EiMMA, WIP, LIP, AppKey, EiToken, SToken
             if ( ChkSessionPara(EiToken, SToken) == true ){
                 if ( sdbg >= 0 ) console.log('session:StartSession SToken=%s,EiMMA=%s', SToken, EiMMA);
                 ins.CallXrpc(ucmma, 'eiStartSession', [EiUDID, EiMMA, wanip, LIP, AppKey, EiToken, SToken], null, null, function(reply){
-                    if ( sdbg >= 0 ) console.log('session:StartSession reply=%s', JSON.stringify(reply));
+                    if ( sdbg >= 0 ) {
+                        let str = JSON.stringify(reply);
+                        console.log('session:StartSession reply=%s', str);
+                    }
                     if ( reply.ErrCode ){
                         if ( typeof cb == 'function' ) cb(reply);
                         ssIocEvent(MyMMA, 'error', 'in', {"Device":EiUMMA,"action":"startSession","result":reply.ErrMsg,"info":regdata});
@@ -780,8 +783,9 @@ var DoFwdXrpcRouting = function(job){
                                 if ( sdbg >= 1 ) console.log('session:DoFwdXrpcRouting mma=%s data=%s',umma, JSON.stringify(udata));
                                 if ( timeout > 5000 ) timeout -= 100;
                                 if ( waitreply > 5000 ) waitreply -= 100;
+                                console.log('session:DoFwdXrpcRouting umma=%s', umma);
                                 ins.CallXrpc(umma, ufunc, udata, timeout, waitreply, function(result){
-                                    if ( sdbg >= 2 ) console.log('session:DoFwdXrpcRouting result=%s', JSON.stringify(result));
+                                    if ( sdbg >= 0 ) console.log('session:DoFwdXrpcRouting result=%s', JSON.stringify(result));
                                     //resolve({"DDN":ddn,"ErrCode":result.ErrCode,"ErrMsg":result.ErrMsg});
                                     //resolve(result);
                                     var cState = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"By":MyMMA};
@@ -810,7 +814,7 @@ var DoFwdXrpcRouting = function(job){
                             }
                         }).then(function(result){
                             InTraceDcResp(result.Reply);
-                            if ( sdbg >= 0 ) console.log('session:DoFwdXrpcRouting result=%s', JSON.stringify(result));
+                            if ( sdbg >= 1 ) console.log('session:DoFwdXrpcRouting result=%s', JSON.stringify(result));
                             reply.push(result);
                         });
                         x += 1;
@@ -833,9 +837,6 @@ var DoFwdXrpcRouting = function(job){
             Promise.all(pm).then(function(){
                 job.status = 'ok';
                 if ( typeof cb == 'function' ) {
-                    //if ( sdbg >= 1 ) console.log('session:DoFwdXrpcRouting reply=%s', JSON.stringify(reply));
-                    //if ( reply.length == 1 ) cb(reply[0]);
-                    //else cb(reply);
                     cb(reply);
                 }
                 if ( sdbg >= 2 ) {
@@ -937,9 +938,10 @@ var DoFwdXmsgRouting = function(job){
                                 ins.SendXmsg( umma, nbody, [], timeout, waitreply, function(result){
                                     if ( sdbg >= 1 ) console.log('session:DoFwdXmsgRouting sendxmsg result=%s', JSON.stringify(result));
                                     if ( result.ErrCode && result.ErrCode !== err.SS_OKCODE) {
-                                        if ( result.ErrMsg == 'Address not found' ){
-                                            EndSession(eimma, nbody.stoken, result.ErrMsg);
-                                        }
+                                        console.log('session:DoFwdXmsgRouting error=%s', result.ErrMsg);
+                                        //if ( result.ErrMsg == 'Address not found' ){
+                                        //    EndSession(eimma, nbody.stoken, result.ErrMsg);
+                                        //}
                                     }
                                     var nState = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"By":MyMMA};
                                     resolve({"IN":{"From":nbody.in.fm,"To":nbody.in.to,"msgtype":nbody.in.msgtype,"State":nState},"Reply":result});
@@ -1227,16 +1229,17 @@ exports.CallXmsg = function(head, body, cb){
             eimma = mma[0].EiMMA;
             newin = {"fm":from,"to":{"DDN":ddn,"Name":dname,"Type":dtype,"Topic":to.Topic},"msgtype":msgtype};
             var nbody = {"in":newin,"data":data};
-            if ( sdbg >= 1 ) console.log('Session:CallXmsg: local mma=%s, data=%s', umma, JSON.stringify(nbody));
+            if ( sdbg >= 1 ) console.log('session:CallXmsg: local mma=%s, data=%s', umma, JSON.stringify(nbody));
             if ( timeout > 5000 ) timeout -= 200;
             if ( waitreply > 5000 ) waitreply -= 200;
             ins.SendXmsg( umma, nbody, [], timeout, waitreply, function(result){
                 InTraceDcResp(result);
-                if ( sdbg >= 1 ) console.log('Session:CallXmsg: local result=%s', JSON.stringify(result));
+                if ( sdbg >= 1 ) console.log('session:CallXmsg: local result=%s', JSON.stringify(result));
                 if ( result.ErrCode && result.ErrCode !== err.SS_OKCODE) {
-                    if ( result.ErrMsg == 'Address not found' ){
-                        EndSession(eimma, nbody.stoken, result.ErrMsg);
-                    }
+                    console.log('session:CallXmsg error=%s', result.ErrMsg);
+                    //if ( result.ErrMsg == 'Address not found' ){
+                    //    EndSession(eimma, nbody.stoken, result.ErrMsg);
+                    //}
                 }
                 if ( typeof cb == 'function' ) {
                     var nState = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"By":MyMMA};
@@ -1261,6 +1264,34 @@ exports.CallXmsg = function(head, body, cb){
 
 exports.ChkSToken = function(stoken){
     return GetSessionInfo(stoken);    
+}
+
+exports.SearchDevice = function( EiMMA, SToken, skey, cb ){
+    SearchEi(EiMMA, SToken, skey, function(reply){
+        var DcUDID, DcMMA;
+        if ( sdbg >= 0 ) console.log('session:SearchDevice:SearchEi reply=%s', JSON.stringify(reply));
+        if ( typeof reply.ErrCode == 'undefined' ){
+            if ( reply.length > 0 ){
+                for ( var k = 0; k < reply.length; k++ ){
+                    DcUDID = reply[k].DcUDID;
+                    if ( DcUDID != MyUDID){
+                        DcMMA = reply[k].DcMMA2;
+                        var di = ins.CreateTicket(5);
+                        var dcinfo = {"key":skey,"index":di,"dc":DcMMA,"UDID":reply[k].DcUDID,"mma":reply[k].EiMMA,"DDN":reply[k].DDN,"Name":reply[k].EiName,"Type":reply[k].EiType};
+                        AddEiCache(dcinfo);
+                        if ( sdbg >= 0 ) console.log('session:SearchDevice:SearchEi dcinfo=%s', JSON.stringify(dcinfo));
+                    }
+                }
+                if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":reply});
+            }
+            else {
+                if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_OKCODE,"Errmsg":err.SS_OKMSG,"result":[]});
+            };
+        }
+        else {
+            if ( typeof cb == 'function' ) cb(reply);
+        }
+    });
 }
 
 var SearchEi = function(EiMMA, SToken, Key, cb){
@@ -1653,6 +1684,7 @@ var GetSessionInfoByMMA = function(EiUMMA, cb){
 }
 
 var StartWatchDog = function(){
+    console.log('Session:StartWatchDog');
     if ( idleTimer != null ) clearInterval(idleTimer);
     idleTimer = setInterval(function(){
         WatchIdleSession();

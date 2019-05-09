@@ -1,7 +1,7 @@
 // appmain: module for main
-// Date: 2019/04/24
-// Version: 1.4
-// Update:
+// Date: 2019/04/29
+// Version: 1.4.2
+// Update: mlog module, add conf.Log = true|false
 
 var exports = module.exports = {};
 var inet;
@@ -10,9 +10,9 @@ var appname;
 var updc = [];
 var session;
 var amerr;
-var adbg = 0;
-var ver = '1.4';
-var vertime = '2019/04/24';
+var adbg = 1;
+var ver = '1.4.2';
+var vertime = '2019/04/29';
 
 exports.Start = function( conf, mlog ){
     console.log('dc start: version=%s updatetime=%s', ver, vertime);
@@ -349,6 +349,10 @@ var XrpcDcService = {
                 //console.log('search: EiMMA=%s,SToken=%s,Keyword=%s',EiMMA,SToken,Keyword);
                 return new Promise(function(resolve) {
                     // do a thing, possibly async, then…
+                    session.SearchDevice( EiMMA, SToken, Keyword, function(result){
+                        resolve(result);
+                    });
+                    /*
                     inet.CallXrpc(ucmma, 'eiSearch', [ EiMMA, SToken, Keyword], null, null, function(result){
                         //console.log('xrpc nearby result=%s', JSON.stringify(result));
                         if ( typeof result.ErrCode == 'undefined' )
@@ -356,6 +360,7 @@ var XrpcDcService = {
                         else
                             resolve(result);
                     });
+                    */
                 });
             }
             else {
@@ -369,7 +374,6 @@ var XrpcDcService = {
     "nearby": function(head, body){
         if (adbg >= 1) console.log('appmain:nearby %s body=%s', typeof body, JSON.stringify(body));
         if ( typeof body == 'object' ){
-            //("nearby: body=%s", JSON.stringify(body));
             if (adbg >= 1) console.log('appmain:nearby body=%s', JSON.stringify(body));
             var EiMMA, SToken;
             EiMMA = head.from;
@@ -400,6 +404,12 @@ var XrpcDcService = {
         console.log("call from=%s", head.from);
         if (adbg >= 1) console.log("appmain:call body=%s", JSON.stringify(body));
         InTraceProc(body);
+        session.RouteXrpc(head, body, function(result){
+            if (adbg >= 1) console.log('appmain:call result=%s', JSON.stringify(result));
+            if ( result[0] ) InTraceResp(result[0].Reply);
+            return result;
+        });
+        /*
         return new Promise(function(resolve) {
             // do a thing, possibly async, then…
             session.RouteXrpc(head, body, function(result){
@@ -408,6 +418,7 @@ var XrpcDcService = {
                 resolve(result); 
             });
         })
+        */
     },
     "echo": function(head, body){
         var sbody

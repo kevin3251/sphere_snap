@@ -13,12 +13,19 @@ if ( process.env.UCenter ) conf.UCenter = process.env.UCenter;
 if ( process.env.IOC ) conf.IOC = process.env.IOC;
 if ( process.env.MotebusGW ) conf.MotebusGW = process.env.MotebusGW;
 if ( process.env.MotebusPort ) conf.MotebusPort = process.env.MotebusPort;
+var islog = false
+if ( process.env.Log || conf.Log ) islog = true;
 console.log('conf=%s',JSON.stringify(conf));
-var os = require('os');
-var mlog = require('./app/mlog.js');
-mlog.init( 'dc_', os.platform(), fs, __dirname,
-  function(){
-    mlog.savetoLog('self','dc init OK');
-  }
-);
-dc.Start( conf, mlog );
+if ( islog ){
+  var os = require('os');
+  var mlog = require('./app/mlog.js');
+  mlog.init( 'dc_', os.platform(), __dirname,
+    function(){
+      mlog.savetoLog('self','dc init OK');
+    }
+  );
+  dc.Start( conf, mlog );
+}
+else {
+  dc.Start( conf );
+}
