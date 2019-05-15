@@ -1,6 +1,7 @@
+#!/snap/sphere/current/bin/node
 // dcenter: proxy of ucenter and relay center
 // Date: 2018/03/08
-// 
+//
 var dc = require('./app/appmain.js')
 var fs = require('fs');
 // conf:
