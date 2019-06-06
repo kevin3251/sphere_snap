@@ -1,28 +1,30 @@
 // appmain: module for main
-// Date: 2019/04/29
-// Version: 1.4.2
-// Update: mlog module, add conf.Log = true|false
+// Date: 2019/05/17
+// Version: 1.4.3
+// Update: add Isolated mode
 
 var exports = module.exports = {};
 var inet;
-var ucmma;
-var appname;
-var updc = [];
+var ucmma = '';
+//var appname = '';
+var isolated = false;
+//var updc = [];
 var session;
 var amerr;
 var adbg = 1;
-var ver = '1.4.2';
-var vertime = '2019/04/29';
+var ver = '1.4.3';
+var vertime = '2019/05/17';
 
 exports.Start = function( conf, mlog ){
     console.log('dc start: version=%s updatetime=%s', ver, vertime);
     amerr = require('./sserr');
     //console.log('chk err=%s', amerr.SS_OKMSG);
-    ucmma = conf.UCenter;
-    appname = conf.AppName;
+    if ( conf.UCenter ) ucmma = conf.UCenter;
+    //if ( conf.AppName ) appname = conf.AppName;
+    if ( conf.Isolated ) isolated = conf.Isolated;
     inet = require('./in');
     inet.Open(conf, mlog, function(result){
-        console.log('Start result=%s', JSON.stringify(result) );
+        console.log('Start IN result=%s', JSON.stringify(result) );
         if ( result.ErrCode == amerr.SS_OKCODE ){
             session = require('./session');
             session.Open(conf, XmsgRcve, XrpcDcService, XrpcDcSecService, inet, mlog, function(result){
@@ -89,26 +91,29 @@ var XrpcDcService = {
         if ( typeof body == 'object' ){
             //console.log("reg: head=%s", JSON.stringify(head));
             //console.log("reg: body=%s", JSON.stringify(body));
-            var EiUDID, EiMMA, WIP, LIP, AppKey, EiToken, SToken, EiUMMA, EiUPort;
+            var EiUDID, EiMMA, EiUMMA;
+            //var WIP, LIP, AppKey, EiToken, SToken, EiUPort;
             EiUDID = head.by;
             EiMMA = head.from;
-            AppKey = body.AppKey;
-            EiToken = body.EiToken;
-            SToken = body.SToken;
-            EiUMMA = body.EiUMMA;
-            EiUPort = body.EiUPort;
-            if ( body.WIP ) WIP = body.WIP;
-            else WIP = '';
-            if ( body.LIP ) LIP = body.LIP;
-            else LIP = '';
-            if ( adbg >= 0 ) console.log('reg: para: %s,%s,%s,%s,%s',SToken,EiToken,EiUMMA,WIP,LIP);
-            if ( adbg >= 1 ) console.log('reg: para: EiUDID=%s,EiMMA=%s,WIP=%s,LIP=%s,AppKey=%s,EiToken=%s,SToken=%s',EiUDID,EiMMA,WIP,LIP,AppKey,EiToken,SToken);
+            if ( adbg >= 1 ) console.log('reg: %s',JSON.stringify(body));
+            else console.log('reg device=%s %s', body,EiUMMA, body.WIP);
+            //if ( adbg >= 1 ) console.log('reg: para: EiUDID=%s,EiMMA=%s,WIP=%s,LIP=%s,AppKey=%s,EiToken=%s,SToken=%s',EiUDID,EiMMA,WIP,LIP,AppKey,EiToken,SToken);
             return new Promise(function(resolve) {
                 // do a thing, possibly async, then…
-                session.StartSession(EiUDID, EiMMA, WIP, LIP, AppKey, EiToken, SToken, EiUMMA, EiUPort, function(result){
-                    if (adbg >= 1) console.log("reg: return=%s", JSON.stringify(result));
-                    resolve(result);
-                });
+                if ( isolated ){
+                    session.StartLocalSession(head.from, body, function(result){
+                        if (adbg >= 2) console.log("reg: return=%s", JSON.stringify(result));
+                        else console.log("reg: return=%s %s %s", result.ErrMsg, result.result.DDN, result.result.EiName);
+                        resolve(result);
+                    });
+                }
+                else {
+                    session.StartSession(EiUDID, EiMMA, body, function(result){
+                        if (adbg >= 2) console.log("reg: return=%s", JSON.stringify(result));
+                        else console.log("reg: return=%s %s %s", result.ErrMsg, result.result.DDN, result.result.EiName);
+                        resolve(result);
+                    });
+                }
             })
         }
         else
@@ -166,15 +171,8 @@ var XrpcDcService = {
                 //console.log('getinfo: EiMMA=%s,SToken=%s',EiMMA,SToken);
                 return new Promise(function(resolve) {
                     // do a thing, possibly async, then…
-                    inet.CallXrpc(ucmma, 'eiGetEdgeInfo', [ EiMMA, SToken ], null, null, function(result){
-                        //console.log('xrpc getinfo result=%s', JSON.stringify(result));
-                        if ( typeof result.ErrCode == 'undefined' )
-                            resolve({"ErrCode":amerr.SS_OKCODE,"ErrMsg":amerr.SS_OKMSG,"result":result});
-                        else {
-                            if ( result.ErrCode == 0 )
-                            session.AddDeviceInfo(SToken, result.result);
-                            resolve(result); 
-                        }
+                    session.GetEdgeInfo(EiMMA, SToken, function(result){
+                        resolve(result);
                     });
                 })
             }
@@ -198,15 +196,8 @@ var XrpcDcService = {
                 //console.log('setinfo: EiMMA=%s,SToken=%s,EdgeInfo=%s',EiMMA,SToken,JSON.stringify(EdgeInfo));
                 return new Promise(function(resolve) {
                     // do a thing, possibly async, then…
-                    inet.CallXrpc(ucmma, 'eiSetEdgeInfo', [ EiMMA, SToken, EdgeInfo ], null, null, function(result){
-                        //console.log('xrpc setinfo result=%s', JSON.stringify(result));
-                        if ( result == true ){
-                            session.AddDeviceInfo(SToken, EdgeInfo);
-                            resolve({"ErrCode":amerr.SS_OKCODE,"ErrMsg":amerr.SS_OKMSG});
-                        }
-                        else {
-                            resolve({"ErrCode":amerr.SS_ERROR_SetDeviceInfoError,"ErrMsg":amerr.SS_ERROR_SetDeviceInfoError_Msg});
-                        }
+                    session.SetEdgeInfo(EiMMA, SToken, EdgeInfo, function(result){
+                        resolve(result);
                     });
                 })
             }
@@ -352,15 +343,6 @@ var XrpcDcService = {
                     session.SearchDevice( EiMMA, SToken, Keyword, function(result){
                         resolve(result);
                     });
-                    /*
-                    inet.CallXrpc(ucmma, 'eiSearch', [ EiMMA, SToken, Keyword], null, null, function(result){
-                        //console.log('xrpc nearby result=%s', JSON.stringify(result));
-                        if ( typeof result.ErrCode == 'undefined' )
-                            resolve({"ErrCode":amerr.SS_OKCODE,"ErrMsg":amerr.SS_OKMSG,"result":result});
-                        else
-                            resolve(result);
-                    });
-                    */
                 });
             }
             else {
@@ -372,7 +354,7 @@ var XrpcDcService = {
             return {"ErrCode":amerr.SS_ERROR_InvalidData,"ErrMsg":amerr.SS_ERROR_InvalidData_Msg}; 
     },
     "nearby": function(head, body){
-        if (adbg >= 1) console.log('appmain:nearby %s body=%s', typeof body, JSON.stringify(body));
+        if (adbg >= 2) console.log('appmain:nearby %s body=%s', typeof body, JSON.stringify(body));
         if ( typeof body == 'object' ){
             if (adbg >= 1) console.log('appmain:nearby body=%s', JSON.stringify(body));
             var EiMMA, SToken;
@@ -383,7 +365,7 @@ var XrpcDcService = {
                 //console.log('nearby: EiMMA=%s,SToken=%s',EiMMA,SToken);
                 return new Promise(function(resolve) {
                     // do a thing, possibly async, then…
-                    inet.CallXrpc(ucmma, 'eiNearBy', [EiMMA, SToken], null, null, function(result){
+                    session.NearbyDevice(EiMMA, SToken, function(result){
                         //console.log('xrpc nearby result=%s', JSON.stringify(result));
                         if ( typeof result.ErrCode == 'undefined' )
                             resolve({"ErrCode":amerr.SS_OKCODE,"ErrMsg":amerr.SS_OKMSG,"result":result});
@@ -404,12 +386,13 @@ var XrpcDcService = {
         console.log("call from=%s", head.from);
         if (adbg >= 1) console.log("appmain:call body=%s", JSON.stringify(body));
         InTraceProc(body);
+        /*
         session.RouteXrpc(head, body, function(result){
             if (adbg >= 1) console.log('appmain:call result=%s', JSON.stringify(result));
             if ( result[0] ) InTraceResp(result[0].Reply);
             return result;
         });
-        /*
+        */
         return new Promise(function(resolve) {
             // do a thing, possibly async, then…
             session.RouteXrpc(head, body, function(result){
@@ -418,7 +401,6 @@ var XrpcDcService = {
                 resolve(result); 
             });
         })
-        */
     },
     "echo": function(head, body){
         var sbody

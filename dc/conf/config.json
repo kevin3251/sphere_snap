@@ -5,5 +5,8 @@
     "MotebusGW":"127.0.0.1",
     "MotebusPort":6161,
     "UplinkDC":"",
-    "Log":false
+    "Log":false,
+    "Isolated":true,
+    "Heartbeat":180,
+    "HBCenter":"ioc@ioc.ypcloud.com:6789"
 }

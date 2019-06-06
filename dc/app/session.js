@@ -1,8 +1,8 @@
 // session: module for session
-// Date: 2019/04/29
-// Version: 1.4.2
+// Date: 2019/05/20
+// Version: 1.4.3
 // Update:
-// Add EndSession
+// Add isolated mode
 
 var exports = module.exports = {};
 const ver = '1.4.2.20190429';
@@ -21,16 +21,18 @@ var AuthKey = '';
 var firstStart = true;
 var snState = '';
 var dcState = '';
-var sdbg = 1;
+var sdbg = 0;
 var err;
 var iocmma = '';
 var updc = [];
+var isolated = false;
 var dcstart = false;
-var EnableWatchDog = false;
+var EnableWatchDog = true;
 var dcStartTimer = null;
 var idleTimer = null;
-const idleInterval = 180000;
-const idleTimeout = 900000;
+var HeartbeatTimeout = 60000;
+var idleInterval = HeartbeatTimeout * 2;
+var idleTimeout = HeartbeatTimeout * 5;
 var EnableCleanCache = true;
 var cacheTimer = null;
 var XmsgRcve;
@@ -47,8 +49,13 @@ exports.Open = function(conf, rcve, dcsrv, dcsecsrv, inobj, log, cb){
         ucmma = (conf.UCenter) ? conf.UCenter : '';
         iocmma = (conf.IOC) ? conf.IOC: '';
         AppName = (conf.AppName) ? conf.AppName : '';
+        if ( conf.Isolated ) isolated = conf.Isolated;
         if ( dcsrv ) XrpcDcService = dcsrv;
         if ( dcsecsrv ) XrpcDcSecService = dcsecsrv;
+        if ( conf.Heartbeat ) {
+            HeartbeatTimeout = conf.Heartbeat;
+            EnableWatchDog = true;
+        }
         ins = inobj;
         if ( log ) mlog = log;
         if ( typeof conf.UplinkDC == 'string' && conf.UplinkDC != '' ) {
@@ -183,25 +190,32 @@ var DcStartHandler = function(cb){
         return;   
     }
     dcstart = true;
-    IssueDcStart(AuthKey, function(result){
-        console.log('session:DcStart result=%s', JSON.stringify(result));
-        if ( result.ErrCode == err.SS_OKCODE ){
-            snState = 'ready';
-            firstState = false;
-            if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG});
-            if ( EnableWatchDog == true ) StartWatchDog();
-            if ( EnableCleanCache == true ) StartCleanCache();
-        }
-        else {
-            snState = 'ucfail';
-            //if ( typeof cb == 'function' ) cb(result);
-            if ( dcStartTimer != null ) clearTimeout( dcStartTimer );
-            var tm = 3000 + Math.floor((Math.random() * 10) + 1) * 100;
-            console.log('session:DcStart setTimout=%s', tm);
-            dcStartTimer = setTimeout(function(){DcStartHandler(cb);},tm);
-        }
-        dcstart = false;
-    });    
+    if ( isolated ){
+        snState = 'ready';
+        firstState = false;
+        if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG});
+    }
+    else {
+        IssueDcStart(AuthKey, function(result){
+            console.log('session:DcStart result=%s', JSON.stringify(result));
+            if ( result.ErrCode == err.SS_OKCODE ){
+                snState = 'ready';
+                firstState = false;
+                if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG});
+                if ( EnableWatchDog == true ) StartWatchDog();
+                if ( EnableCleanCache == true ) StartCleanCache();
+            }
+            else {
+                snState = 'ucfail';
+                //if ( typeof cb == 'function' ) cb(result);
+                if ( dcStartTimer != null ) clearTimeout( dcStartTimer );
+                var tm = 3000 + Math.floor((Math.random() * 10) + 1) * 100;
+                console.log('session:DcStart setTimout=%s', tm);
+                dcStartTimer = setTimeout(function(){DcStartHandler(cb);},tm);
+            }
+            dcstart = false;
+        });  
+    }  
 }
 
 var IssueDcStart = function(akey, cb){
@@ -228,50 +242,97 @@ var IssueDcStart = function(akey, cb){
     }
 }
 
-exports.StartSession = function(EiUDID, EiMMA, WIP, LIP, AppKey, EiToken, SToken, EiUMMA, EiUPort, cb){
+exports.StartSession = function(EiUDID, EiMMA, reginfo, cb){
     var ret;
+    var WIP, LIP, AppKey, EiToken, SToken, EiUMMA, EiUPort;
+    WIP = (reginfo.WIP) ? reginfo.WIP : '';
+    LIP = (reginfo.LIP) ? reginfo.LIP : '';
+    AppKey = (reginfo.AppKey) ? reginfo.AppKey : '';
+    EiToken = (reginfo.EiToken) ? reginfo.EiToken : '';
+    SToken = (reginfo.SToken) ? reginfo.SToken : '';
+    EiUMMA = (reginfo.EiUMMA) ? reginfo.EiUMMA : '';
+    EiUPort = (reginfo.EiUPort) ? reginfo.EiUPort : '';
     var wanip = WIP ? WIP : MyWANIP;
     if ( !wanip && LIP ) wanip = LIP;
     var regdata = {"MMA":EiMMA,"WIP":wanip,"LIP":LIP};
     //console.log('session:startsession snState=%s', snState);
     if ( snState == 'ready'){
-        //if ( WIP != "" ){
-            if ( ChkSessionPara(EiToken, SToken) == true ){
-                if ( sdbg >= 0 ) console.log('session:StartSession SToken=%s,EiMMA=%s', SToken, EiMMA);
-                ins.CallXrpc(ucmma, 'eiStartSession', [EiUDID, EiMMA, wanip, LIP, AppKey, EiToken, SToken], null, null, function(reply){
-                    if ( sdbg >= 0 ) {
-                        let str = JSON.stringify(reply);
-                        console.log('session:StartSession reply=%s', str);
-                    }
-                    if ( reply.ErrCode ){
-                        if ( typeof cb == 'function' ) cb(reply);
-                        ssIocEvent(MyMMA, 'error', 'in', {"Device":EiUMMA,"action":"startSession","result":reply.ErrMsg,"info":regdata});
-                    }
-                    else {
-                        AddSessionInfo( AppKey, EiUMMA, EiUPort, wanip, LIP, reply, cb);
-                        var ddn = reply.DDN;
-                        var dtype = '';
-                        if ( reply.EdgeInfo ){
-                            var eginfo = reply.EdgeInfo;
-                            device = eginfo.EiName ? eginfo.EiName : ( eginfo.EiUMMA ? eginfo.EiUMMA : '');
-                            dtype = eginfo.EiType ? eginfo.EiType : '';
+        if ( ChkSessionPara(EiToken, SToken) == true ){
+            if ( sdbg >= 1 ) console.log('session:StartSession SToken=%s,EiMMA=%s', SToken, EiMMA);
+            ins.CallXrpc(ucmma, 'eiStartSession', [EiUDID, EiMMA, wanip, LIP, AppKey, EiToken, SToken], null, null, function(reply){
+                if ( sdbg >= 1 ) {
+                    let str = JSON.stringify(reply);
+                    console.log('session:StartSession reply=%s', str);
+                }
+                if ( reply.ErrCode ){
+                    if ( typeof cb == 'function' ) cb(reply);
+                    ssIocEvent(MyMMA, 'error', 'in', {"Device":EiUMMA,"action":"startSession","result":reply.ErrMsg,"info":reginfo});
+                }
+                else {
+                    AddSessionInfo( AppKey, EiUMMA, EiUPort, wanip, LIP, reply, function(result){
+                        if ( sdbg >= 1 ) console.log('AddSessionInfo result=%s', JSON.stringify(result));
+                        if ( result.ErrCode == err.SS_OKCODE && result.result ){
+                            var regei = result.result;
+                            var ddn = regei.DDN;
+                            var device = ddn;
+                            var dtype = '';
+                            if ( regei.EiName ) device = regei.EiName;
+                            if ( regei.EiType ) dtype = regei.EiType;
+                            ssIocEvent(MyMMA, 'info', 'in', {"Device":device,"DDN":ddn,"Type":dtype,"action":"startSession","result":"OK","info":reginfo});
+                            if ( reginfo.EiInfo ){
+                                if ( sdbg >= 1 ) console.log('AddSessionInfo EiInfo=%s, device=%s', JSON.stringify(reginfo.EiInfo), device);
+                                if ( reginfo.EiInfo.EiName != device ) {
+                                    if ( isolated ){
+                                        AddDeviceInfo(SToken, reginfo.EiInfo);
+                                        if ( typeof cb == 'function' ){
+                                            if ( reginfo.EiInfo.EiName ) regei.EiName = reginfo.EiInfo.EiName;
+                                            if ( reginfo.EiInfo.EiType ) regei.EiType = reginfo.EiInfo.EiType;
+                                            if ( reginfo.EiInfo.EiTag ) regei.EiTag = reginfo.EiInfo.EiTag;
+                                            if ( reginfo.EiInfo.EiLoc ) regei.EiLoc = reginfo.EiInfo.EiLoc;
+                                            cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":regei});
+                                        }
+                                    }
+                                    else {
+                                        EiMMA = regei.EiMMA;
+                                        SToken = regei.SToken;
+                                        SetEdgeInfo(EiMMA, SToken, reginfo.EiInfo, function(result){
+                                            if ( typeof cb == 'function' ) {
+                                                if ( result.ErrCode == err.SS_OKCODE ){
+                                                    if ( reginfo.EiInfo.EiName ) regei.EiName = reginfo.EiInfo.EiName;
+                                                    if ( reginfo.EiInfo.EiType ) regei.EiType = reginfo.EiInfo.EiType;
+                                                    if ( reginfo.EiInfo.EiTag ) regei.EiTag = reginfo.EiInfo.EiTag;
+                                                    if ( reginfo.EiInfo.EiLoc ) regei.EiLoc = reginfo.EiInfo.EiLoc;
+                                                    cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":regei});
+                                                }
+                                                else {
+                                                    cb(result);
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
+                                else {
+                                    if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":regei});
+                                }
+                            }
+                            else {
+                                if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":regei});
+                            }
                         }
-                        ssIocEvent(MyMMA, 'info', 'in', {"Device":device,"DDN":ddn,"Type":dtype,"action":"startSession","result":"OK","info":regdata});
-                    }
-                });
-            }
-            else {
-                ret = {"ErrCode":err.SS_ERROR_NoRegData,"ErrMsg":err.SS_ERROR_NoRegData_Msg};
-                if ( typeof cb == 'function' ) cb(ret); 
-                ssIocEvent(MyMMA, 'error', 'in', {"Device":EiUMMA,"action":"startSession","result":ret.ErrMsg,"info":regdata});    
-            }
-        //}
-        //else {
-            // no WAN IP
-        //    ret = {"ErrCode":err.SS_ERROR_NoWanIp,"ErrMsg":err.SS_ERROR_NoWanIp_Msg};
-        //    if ( typeof cb == 'function' ) cb(ret); 
-        //    ssIocEvent( MyMMA, 'error', 'in', {"Device":EiUMMA,"action":"startSession","result":ret.ErrMsg,"info":regdata});
-        //}
+                        else {
+                            ret = {"ErrCode":err.SS_ERROR_NoRegData,"ErrMsg":err.SS_ERROR_NoRegData_Msg};
+                            if ( typeof cb == 'function' ) cb(ret); 
+                            ssIocEvent(MyMMA, 'error', 'in', {"Device":EiUMMA,"action":"startSession","result":ret.ErrMsg,"info":reginfo});    
+                        }
+                    });
+                }
+            });
+        }
+        else {
+            ret = {"ErrCode":err.SS_ERROR_NoRegData,"ErrMsg":err.SS_ERROR_NoRegData_Msg};
+            if ( typeof cb == 'function' ) cb(ret); 
+            ssIocEvent(MyMMA, 'error', 'in', {"Device":EiUMMA,"action":"startSession","result":ret.ErrMsg,"info":regdata});    
+        }
     }
     else {
         // dc not ready
@@ -295,6 +356,45 @@ exports.StartSession = function(EiUDID, EiMMA, WIP, LIP, AppKey, EiToken, SToken
     }   
 }
 
+exports.StartLocalSession = function(from, conf, cb){
+    console.log('ss:StartLocalSession conf=%s', JSON.stringify(conf));
+    let EiToken = conf.EiToken ? conf.EiToken : '';
+    let SToken = conf.SToken ? conf.SToken : '';
+    if ( ChkSessionPara(EiToken, SToken) == true ){
+        AddLocalSessionInfo(from, conf, function(result){
+            if ( typeof cb == 'function' ) cb(result);
+        });
+    }
+    else {
+        ret = {"ErrCode":err.SS_ERROR_NoRegData,"ErrMsg":err.SS_ERROR_NoRegData_Msg};
+        if ( typeof cb == 'function' ) cb(ret); 
+        ssIocEvent(MyMMA, 'error', 'in', {"Device":EiUMMA,"action":"StartLocalSession","result":ret.ErrMsg});    
+    }
+}
+
+exports.SetEdgeInfo = function(EiMMA, SToken, EdgeInfo, cb){
+    SetEdgeInfo(EiMMA, SToken, EdgeInfo, cb);
+}
+
+var SetEdgeInfo = function(EiMMA, SToken, EdgeInfo, cb){
+    if ( isolated ){
+        AddDeviceInfo(SToken, EdgeInfo);
+        if ( typeof cb == 'function') cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG});
+    }
+    else {
+        ins.CallXrpc(ucmma, 'eiSetEdgeInfo', [ EiMMA, SToken, EdgeInfo ], null, null, function(result){
+            console.log('xrpc setinfo result=%s', JSON.stringify(result));
+            if ( result == true ){
+                AddDeviceInfo(SToken, EdgeInfo);
+                if ( typeof cb == 'function') cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":EdgeInfo});
+            }
+            else {
+                if ( typeof cb == 'function') cb({"ErrCode":err.SS_ERROR_SetDeviceInfoError,"ErrMsg":err.SS_ERROR_SetDeviceInfoError_Msg});
+            }
+        });
+    }
+}
+
 var ChkSessionPara = function(eitoken, stoken){
     if ( eitoken == '' ){
         if ( stoken == '' ) return true;
@@ -303,6 +403,33 @@ var ChkSessionPara = function(eitoken, stoken){
     else {
         if ( stoken != '' ) return true;
         else return false;
+    }
+}
+
+exports.GetEdgeInfo = function(EiMMA, SToken, cb){
+    GetEdgeInfo(EiMMA, SToken, cb);
+}
+
+var GetEdgeInfo = function(EiMMA, SToken, cb){
+    if ( isolated ){
+        var ei = GetDeviceInfo(SToken);
+        if ( typeof cb == 'function' ){
+            if ( ei ) cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":ei});
+            else cb({"ErrCode":err.SS_ERROR_NoRegData,"ErrMsg":err.SS_ERROR_NoRegData_Msg});
+        }
+    }
+    else {
+        ins.CallXrpc(ucmma, 'eiGetAppSetting', [ EiMMA, SToken ], null, null, function(result){
+            if (adbg >= 1) console.log('GetEdgeInfo result=%s', JSON.stringify(result));
+            if ( typeof cb == 'function' ){
+                if ( typeof result.ErrCode == 'undefined' ){
+                    cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":result});
+                }
+                else{
+                    cb(result); 
+                }
+            }     
+        });
     }
 }
 
@@ -317,30 +444,39 @@ var EndSession = function(EiMMA, SToken, reason, cb){
             regtable[ix].State = 'unreg';
             var ddn = regtable[ix].DDN;
             var device = regtable[ix].EiName ? regtable[ix].EiName : ( regtable[ix].EiUMMA ? regtable[ix].EiUMMA : '');
-            ins.CallXrpc(ucmma, 'eiEndSession', [ EiMMA, SToken ], null, null, function(result){
+            console.log('EndSession device=%s ddn=%s', device, ddn);
+            if ( isolated ){
+                RmSessionInfo(SToken);
+                ret = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG};
+                if ( typeof cb == 'function' ) cb(ret);
+                ssIocEvent( MyMMA, 'error', 'in', {"Device":device,"DDN":ddn,"action":"endSession","result":ret.ErrMsg});
+            }
+            else {
+                ins.CallXrpc(ucmma, 'eiEndSession', [ EiMMA, SToken ], null, null, function(result){
                 if ( typeof result == 'object' )
                     if ( sdbg >= 1 ) console.log('xrpc unreg result=%s', JSON.stringify(result));
                 else
                     if ( sdbg >= 1 ) console.log('xrpc unreg result=%s', result);
-                RmSessionInfo(SToken);
-                if ( !result.ErrCode ){
-                    if ( result == true ){
-                        //RmSessionInfo(SToken);
-                        ret = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG};
+                    RmSessionInfo(SToken);
+                    if ( !result.ErrCode ){
+                        if ( result == true ){
+                            //RmSessionInfo(SToken);
+                            ret = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG};
+                        }
+                        else
+                            ret = {"ErrCode":err.SS_ERRCODE,"ErrMsg":"Unknown reason"};
+                        if ( typeof cb == 'function' ) cb(ret);
+                        if ( reason == 'Timeout' )
+                            ssIocEvent( MyMMA, 'error', 'in', {"Device":device,"DDN":ddn,"action":"endSession","result":reason});
+                        else if ( reason == '' )
+                            ssIocEvent( MyMMA, 'info', 'in', {"Device":device,"DDN":ddn,"action":"endSession","result":ret.ErrMsg});
                     }
-                    else
-                        ret = {"ErrCode":err.SS_ERRCODE,"ErrMsg":"Unknown reason"};
-                    if ( typeof cb == 'function' ) cb(ret);
-                    if ( reason == 'Timeout' )
-                        ssIocEvent( MyMMA, 'error', 'in', {"Device":device,"DDN":ddn,"action":"endSession","result":reason});
-                    else if ( reason == '' )
-                        ssIocEvent( MyMMA, 'info', 'in', {"Device":device,"DDN":ddn,"action":"endSession","result":ret.ErrMsg});
-                }
-                else {
-                    if ( typeof cb == 'function' ) cb(result);
-                    ssIocEvent( MyMMA, 'error', 'in', {"Device":device,"DDN":ddn,"action":"endSession","result":result.ErrMsg});
-                }
-            });
+                    else {
+                        if ( typeof cb == 'function' ) cb(result);
+                        ssIocEvent( MyMMA, 'error', 'in', {"Device":device,"DDN":ddn,"action":"endSession","result":result.ErrMsg});
+                    }
+                });
+            }
         }
         else {
             if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_ERROR_NoRegData,"ErrMsg":err.SS_ERROR_NoRegData_Msg});
@@ -367,26 +503,38 @@ var EndSession = function(EiMMA, SToken, reason, cb){
     }   
 }
 
-exports.ResetSession = function(EiUDID, DcMMA, EiUMMA, cb){
+exports.ResetSession = function(EiUDID, mbMMA, EiUMMA, cb){
     // Get the list of session which match udid
     // Set timeout for timestamp checking
     // if timestamp doesn't be updated, then endsession
     var ret;
-    if ( sdbg >= 1 ) console.log('ResetSession: EiUDID=%s, EiUMMA=%s', EiUDID, EiUMMA);
+    if ( sdbg >= 1 ) console.log('ResetSession: mbMMA=%s, EiUMMA=%s', mbMMA, EiUMMA);
     GetSessionInfoByMMA( EiUMMA, function(ssinfo){
-        if ( sdbg >= 1 ) console.log('ResetSession: session=%s', JSON.stringify(ssinfo));
+        if ( sdbg >= 0 ) console.log('ResetSession: session=%s', JSON.stringify(ssinfo));
         //ins.iocEvent('in', 'dc', EiUDID, 'info', 'reset session...', MyMMA);
         if ( ssinfo ){
             ssIocEvent( MyMMA, 'info', 'in', {"Device":EiUMMA,"action":"resetSession","result":"OK"});
-            for ( var i = 0; i < ssinfo.length; i++ ){
-                var tm = 100 + Math.floor((Math.random() * 10) + 1) * 100;
-                setTimeout(function(ei, stoken){
-                    EndSession(ei, stoken, 'Reset');
-                },tm, ssinfo[i].EiMMA, ssinfo[i].SToken);
+            var index;
+            if (isolated){
+                for ( var i = ssinfo.length-1; i >= 0; i-- ){
+                    index = GetSessionInfo(ssinfo[i].SToken);
+                    if ( index >= 0 ){
+                        regtable.splice(index, 1);
+                    }
+                }
             }
-            ret = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"ResetCount":ssinfo.length,"DC":MyMMA,"WIP":MyWANIP};
+            else {
+                for ( var i = 0; i < ssinfo.length; i++ ){
+                    //index = GetSessionInfo(ssinfo[i].SToken);
+                    index = ssinfo[i].Index;
+                    if ( index >= 0 ) {
+                        regtable[index].State = 'reset';
+                    }
+                }
+            }
+            ret = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"ResetCount":ssinfo.length,"DC":MyMMA,"WIP":MyWANIP,"HeartbeatTimeout":HeartbeatTimeout};
         }
-        else ret = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"DC":MyMMA,"WIP":MyWANIP};
+        else ret = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"DC":MyMMA,"WIP":MyWANIP,"HeartbeatTimeout":HeartbeatTimeout};
         if ( typeof cb == 'function'){
             cb(ret);
         }
@@ -433,18 +581,17 @@ exports.RouteXmsg = function(head, body, cb){
                         } 
                     }
                     else {
-                        if ( typeof cb == 'function' ) cb({"IN":{"From":from,"To":to,"msgtype":msgtype,"State":{"ErrCode":err.SS_ERROR_Busy,"ErrMsg":err.SS_ERROR_Busy_Msg,"By":MyMMA}},"Reply":""});
+                        if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_ERROR_Busy,"ErrMsg":err.SS_ERROR_Busy_Msg,"By":MyMMA});
                     }
                 }
-                else if ( typeof cb == 'function' ) {
-                    var errcode, errmsg;
-                    errcode = err.SS_ERROR_NoRegData;
-                    errmsg = err.SS_ERROR_NoRegData_Msg;
-                    if ( typeof cb == 'function' ) cb({"IN":{"From":from,"To":to,"msgtype":msgtype,"State":{"ErrCode":errcode,"ErrMsg":errmsg,"By":MyMMA}},"Reply":""});
+                else {
+                    if ( typeof cb == 'function' ) {
+                        cb({"ErrCode":err.SS_ERROR_NoRegData,"ErrMsg":err.SS_ERROR_NoRegData_Msg,"By":MyMMA});
+                    }
                 }
             }
             else {
-                if ( typeof cb == 'function' ) cb({"IN":{"From":from,"To":to,"msgtype":msgtype,"State":{"ErrCode":err.SS_ERROR_InvalidData,"ErrMsg":err.SS_ERROR_InvalidData_Msg,"By":MyMMA}},"Reply":""});    
+                if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_ERROR_InvalidData,"ErrMsg":err.SS_ERROR_InvalidData_Msg,"By":MyMMA});    
             }
             var newjob = ChkFwdTask();
             if ( newjob != null ) DoFwdTask( newjob );
@@ -459,7 +606,7 @@ exports.RouteXmsg = function(head, body, cb){
                 errcode = err.SS_ERROR_DcNotReady;
                 errmsg = err.SS_ERROR_DcNotReady_Msg;
             }
-            if ( typeof cb == 'function' ) cb({"IN":{"From":from,"To":to,"msgtype":msgtype,"State":{"ErrCode":errcode,"ErrMsg":errmsg,"By":MyMMA}},"Reply":""});
+            if ( typeof cb == 'function' ) cb({"ErrCode":errcode,"ErrMsg":errmsg,"By":MyMMA});
             if ( snState == 'ucfail' ) ssreset(null, false);
             //if ( dcStartTimer == null ){
             //    var tm = 2000 + Math.floor((Math.random() * 10) + 1) * 100;
@@ -503,14 +650,11 @@ exports.RouteXrpc = function(head, body, cb){
                     }
                 }
                 else if ( typeof cb == 'function' ) {
-                    var errcode, errmsg;
-                    errcode = err.SS_ERROR_NoRegData;
-                    errmsg = err.SS_ERROR_NoRegData_Msg;
-                    if ( typeof cb == 'function' ) cb({"IN":{"From":from,"To":to,"msgtype":msgtype,"State":{"ErrCode":errcode,"ErrMsg":errmsg,"By":MyMMA}},"Reply":""});
+                    cb({"ErrCode":err.SS_ERROR_NoRegData,"ErrMsg":err.SS_ERROR_NoRegData_Msg,"By":MyMMA});
                 }
             }
             else {
-                if ( typeof cb == 'function' ) cb({"IN":{"From":from,"To":to,"msgtype":msgtype,"State":{"ErrCode":err.SS_ERROR_InvalidData,"ErrMsg":err.SS_ERROR_InvalidData_Msg,"By":MyMMA}},"Reply":""});
+                if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_ERROR_InvalidData,"ErrMsg":err.SS_ERROR_InvalidData_Msg,"By":MyMMA});
             }
             var newjob = ChkFwdTask();
             if ( newjob != null ) DoFwdTask( newjob ); 
@@ -525,7 +669,7 @@ exports.RouteXrpc = function(head, body, cb){
                 errcode = err.SS_ERROR_DcNotReady;
                 errmsg = err.SS_ERROR_DcNotReady_Msg;
             }
-            if ( typeof cb == 'function' ) cb({"IN":{"From":from,"To":to,"msgtype":msgtype,"State":{"ErrCode":errcode,"ErrMsg":errmsg,"By":MyMMA}},"Reply":""});
+            if ( typeof cb == 'function' ) cb({"ErrCode":errcode,"ErrMsg":errmsg,"By":MyMMA});
             if ( snState == 'ucfail' ) {
                 ssreset(null, false);
             }
@@ -555,14 +699,17 @@ exports.poll = function(mma, cb){
                 var rmma = mma;
                 if ( regtable.length > 0 ){
                     //console.log('session:poll regtable:0=%s', JSON.stringify(regtable[0]));
-                    var eimma;
+                    var eimma, device;
                     for( var i = 0; i < regtable.length; i++ ){
                         eimma = regtable[i].EiMMA;
                         //console.log('--##session:poll eimma=%s,einame=%s', eimma, regtable[i].EiName);
                         //if ( eimma ) eimma.trim();
                         if ( rmma == eimma ) {
                             regtable[i].TimeStamp = new Date();
+                            regtable[i].Polled = true;
                             ret.result.push(regtable[i].SToken);
+                            device = regtable[i].EiName ? regtable[i].EiName : regtable[i].DDN;
+                            ssIocEvent(MyMMA, 'error', 'in', {"Device":device,"action":"heartbeat","result":"OK"}); 
                             break;
                         }
                     }
@@ -589,18 +736,22 @@ var AddFwdTask = function(method, regix, from, to, msgtype, head, body, cb){
     var mode = '';
     var search = 'dev';
     var taskno = 0;
+    var discover = '';
     if ( sdbg >= 1 ) console.log('Session:AddFwdTask method=%s,body=%s', method,JSON.stringify(body));
     target = to.Target ? to.Target : '';
     if ( to.DDN ) {
         target = to.DDN;
         search = 'ddn';
     }
+    if ( to.Search ){
+        discover = to.Search;
+    }
     if ( target.indexOf(',') > 0 || target.indexOf('#') >= 0 ) type = 'multi';
     else type = 'one';
     if ( sdbg >= 1 ) console.log('Session:AddFwdTask target=%s',target);
     if ( target && from  && to ){
         //var mclass = (method == 'xrpc') ? 'call': 'send';
-        var job = {"ticket":ticket,"method":method,"regix":regix,"type":type,"status":"","app":app,"from":from,"msgtype":msgtype,"fromMMA":head.from,"tartet":target,"to":to,"body":body,"cb":cb,"task":[],"reply":[]};
+        var job = {"ticket":ticket,"method":method,"regix":regix,"type":type,"discover":discover,"status":"","app":app,"from":from,"msgtype":msgtype,"fromMMA":head.from,"tartet":target,"to":to,"body":body,"cb":cb,"task":[],"reply":[]};
         if ( sdbg >= 1 ) console.log('AddFwdTask job=%s',JSON.stringify(job));
         var tarr = target.split(',');
         var tt;
@@ -649,12 +800,14 @@ var ChkFwdTask = function(){
 
 var DoFwdTask = function(job){
     var type = job.type;
+    var discover = job.discover;
     if ( sdbg >= 2 ) console.log('session:DoFwdTask job=%s', JSON.stringify(job));
     var bret = SearchLocalTarget(job);
     //console.log('session:DoFwdTask searchlocaltarget return=%s', bret);
-    if ( bret == true && type == 'one' ) DoFwdRouting(job);
-    else SearchRemoteTarget(job, DoFwdRouting);
-   
+    if ( (bret == true && type == 'one') || discover == 'local' ) DoFwdRouting(job);
+    else {
+        if ( !isolated ) SearchRemoteTarget(job, DoFwdRouting);
+    }
 }
 
 var RmFwdTask = function(ix){
@@ -786,10 +939,18 @@ var DoFwdXrpcRouting = function(job){
                                 console.log('session:DoFwdXrpcRouting umma=%s', umma);
                                 ins.CallXrpc(umma, ufunc, udata, timeout, waitreply, function(result){
                                     if ( sdbg >= 0 ) console.log('session:DoFwdXrpcRouting result=%s', JSON.stringify(result));
-                                    //resolve({"DDN":ddn,"ErrCode":result.ErrCode,"ErrMsg":result.ErrMsg});
-                                    //resolve(result);
-                                    var cState = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"By":MyMMA};
-                                    resolve({"IN":{"From":udata.in.fm,"To":udata.in.to,"msgtype":udata.in.msgtype,"State":cState},"Reply":result});
+                                    console.log('session:DoFwdXrpcRouting mma=%s result=%s', umma, JSON.stringify(result));
+                                    //var cState = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"By":MyMMA};
+                                    //resolve({"IN":{"From":udata.in.fm,"To":udata.in.to,"msgtype":udata.in.msgtype,"State":cState},"Reply":result});
+                                    var cState;
+                                    if ( result.MMA ){
+                                        cState = {"ErrCode":result.ErrCode,"ErrMsg":result.ErrMsg,"By":MyMMA};
+                                        resolve({"IN":{"From":udata.in.fm,"To":udata.in.to,"msgtype":udata.in.msgtype,"State":cState},"Reply":""});
+                                    }
+                                    else {
+                                        cState = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"By":MyMMA};
+                                        resolve({"IN":{"From":udata.in.fm,"To":udata.in.to,"msgtype":udata.in.msgtype,"State":cState},"Reply":result});
+                                    }
                                 });
                             }
                             else {
@@ -802,14 +963,16 @@ var DoFwdXrpcRouting = function(job){
                                 if ( waitreply > 5000 ) waitreply -= 2000;
                                 ins.CallXrpc(DcMMA, 'callto', nbody, timeout, waitreply, function(result){
                                     if ( sdbg >= 1 ) console.log('Session:DoFwdXrpcRouting DC result=%s', JSON.stringify(result));
-                                    if ( result.ErrCode ){
+                                    var cState;
+                                    if ( result.MMA ){
                                         //if ( result.ErrCode != err.SS_OKCODE) DelEiCache(key);
                                         if ( result.ErrCode != err.SS_OKCODE) DelEiCacheByIndex(dcindex);
-                                        var cState = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"By":MyMMA};
-                                        resolve({"IN":{"From":nbody.in.fm,"To":nbody.to,"msgtype":nbody.in.msgtype,"State":cState},"Reply":result});
+                                        cState = {"ErrCode":result.ErrCode,"ErrMsg":result.ErrMsg,"By":MyMMA};
+                                        resolve({"IN":{"From":nbody.in.fm,"To":nbody.to,"msgtype":nbody.in.msgtype,"State":cState},"Reply":""});
                                     }
-                                    else 
+                                    else {
                                         resolve(result);
+                                    }
                                 });
                             }
                         }).then(function(result){
@@ -937,14 +1100,31 @@ var DoFwdXmsgRouting = function(job){
                                 if ( sdbg >= 0 ) console.log('session:DoFwdXmsgRouting sendxmsg umma=%s', umma);
                                 ins.SendXmsg( umma, nbody, [], timeout, waitreply, function(result){
                                     if ( sdbg >= 1 ) console.log('session:DoFwdXmsgRouting sendxmsg result=%s', JSON.stringify(result));
+                                    console.log('session:DoFwdXmsgRouting mma=%s result=%s', umma, JSON.stringify(result));
+                                    var cState;
+                                    if ( result.MMA ){
+                                        cState = {"ErrCode":result.ErrCode,"ErrMsg":result.ErrMsg,"By":MyMMA};
+                                        resolve({"IN":{"From":nbody.in.fm,"To":nbody.in.to,"msgtype":nbody.in.msgtype,"State":cState},"Reply":""});
+                                    }
+                                    else {
+                                        cState = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"By":MyMMA};
+                                        resolve({"IN":{"From":nbody.in.fm,"To":nbody.in.to,"msgtype":nbody.in.msgtype,"State":cState},"Reply":result});
+                                    }
+                                    /*
+                                    var nState;
                                     if ( result.ErrCode && result.ErrCode !== err.SS_OKCODE) {
                                         console.log('session:DoFwdXmsgRouting error=%s', result.ErrMsg);
+                                        nState = {"ErrCode":result.ErrCode,"ErrMsg":result.ErrMsg,"By":MyMMA}
+                                        resolve({"IN":{"From":nbody.in.fm,"To":nbody.in.to,"msgtype":nbody.in.msgtype,"State":nState},"Reply":""});
                                         //if ( result.ErrMsg == 'Address not found' ){
                                         //    EndSession(eimma, nbody.stoken, result.ErrMsg);
                                         //}
                                     }
-                                    var nState = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"By":MyMMA};
-                                    resolve({"IN":{"From":nbody.in.fm,"To":nbody.in.to,"msgtype":nbody.in.msgtype,"State":nState},"Reply":result});
+                                    else {
+                                        nState = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"By":MyMMA};
+                                        resolve({"IN":{"From":nbody.in.fm,"To":nbody.in.to,"msgtype":nbody.in.msgtype,"State":nState},"Reply":result});
+                                    }
+                                    */
                                 });
                             }
                             else {
@@ -957,14 +1137,25 @@ var DoFwdXmsgRouting = function(job){
                                 if ( waitreply > 5000 ) waitreply -= 2000;
                                 ins.CallXrpc(DcMMA, 'sendto', nbody, timeout, waitreply, function(result){
                                     if ( sdbg >= 1 ) console.log('Session:DoFwdXmsgRouting DC result=%s', JSON.stringify(result));
-                                    if ( result.ErrCode ){
+                                    var cState;
+                                    if ( result.MMA ){
                                         //if ( result.ErrCode != err.SS_OKCODE) DelEiCache(key);
+                                        if ( result.ErrCode != err.SS_OKCODE) DelEiCacheByIndex(dcindex);
+                                        cState = {"ErrCode":result.ErrCode,"ErrMsg":result.ErrMsg,"By":MyMMA};
+                                        resolve({"IN":{"From":nbody.in.fm,"To":nbody.to,"msgtype":nbody.in.msgtype,"State":cState},"Reply":""});
+                                    }
+                                    else {
+                                        resolve(result);
+                                    }
+                                    /*
+                                    if ( result.ErrCode ){
                                         if ( result.ErrCode != err.SS_OKCODE) DelEiCacheByIndex(dcindex);
                                         var cState = {"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"By":MyMMA};
                                         resolve({"IN":{"From":nbody.in.fm,"To":nbody.to,"msgtype":nbody.in.msgtype,"State":cState},"Reply":result});
                                     }
                                     else 
                                         resolve(result);
+                                    */
                                 });
                             }
                         }).then(function(result){
@@ -1267,31 +1458,61 @@ exports.ChkSToken = function(stoken){
 }
 
 exports.SearchDevice = function( EiMMA, SToken, skey, cb ){
-    SearchEi(EiMMA, SToken, skey, function(reply){
-        var DcUDID, DcMMA;
-        if ( sdbg >= 0 ) console.log('session:SearchDevice:SearchEi reply=%s', JSON.stringify(reply));
-        if ( typeof reply.ErrCode == 'undefined' ){
-            if ( reply.length > 0 ){
-                for ( var k = 0; k < reply.length; k++ ){
-                    DcUDID = reply[k].DcUDID;
-                    if ( DcUDID != MyUDID){
-                        DcMMA = reply[k].DcMMA2;
-                        var di = ins.CreateTicket(5);
-                        var dcinfo = {"key":skey,"index":di,"dc":DcMMA,"UDID":reply[k].DcUDID,"mma":reply[k].EiMMA,"DDN":reply[k].DDN,"Name":reply[k].EiName,"Type":reply[k].EiType};
-                        AddEiCache(dcinfo);
-                        if ( sdbg >= 0 ) console.log('session:SearchDevice:SearchEi dcinfo=%s', JSON.stringify(dcinfo));
+    if ( isolated ){
+        var result = SearchSessionInfo('xrpc','dev', skey);
+        if ( typeof cb == 'function' ){
+            if ( result ) cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":result});
+            else cb({"ErrCode":err.SS_ERROR_NoRegData,"ErrMsg":SS_ERROR_NoRegData_Msg});
+        }
+    }
+    else {
+        SearchEi(EiMMA, SToken, skey, function(reply){
+            var DcUDID, DcMMA;
+            if ( sdbg >= 0 ) console.log('session:SearchDevice:SearchEi reply=%s', JSON.stringify(reply));
+            if ( typeof reply.ErrCode == 'undefined' ){
+                if ( reply.length > 0 ){
+                    for ( var k = 0; k < reply.length; k++ ){
+                        DcUDID = reply[k].DcUDID;
+                        if ( DcUDID != MyUDID){
+                            DcMMA = reply[k].DcMMA2;
+                            var di = ins.CreateTicket(5);
+                            var dcinfo = {"key":skey,"index":di,"dc":DcMMA,"UDID":reply[k].DcUDID,"mma":reply[k].EiMMA,"DDN":reply[k].DDN,"Name":reply[k].EiName,"Type":reply[k].EiType};
+                            AddEiCache(dcinfo);
+                            if ( sdbg >= 0 ) console.log('session:SearchDevice:SearchEi dcinfo=%s', JSON.stringify(dcinfo));
+                        }
                     }
+                    if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":reply});
                 }
-                if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":reply});
+                else {
+                    if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_OKCODE,"Errmsg":err.SS_OKMSG,"result":[]});
+                };
             }
             else {
-                if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_OKCODE,"Errmsg":err.SS_OKMSG,"result":[]});
-            };
+                if ( typeof cb == 'function' ) cb(reply);
+            }
+        });
+    }
+}
+
+exports.NearbyDevice = function(EiMMA, SToken, cb){
+    if (isolated){
+        var result = SearchSessionInfo('xrpc','all', skey);
+        if ( typeof cb == 'function' ){
+            if ( result ) cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":result});
+            else cb({"ErrCode":err.SS_ERROR_NoRegData,"ErrMsg":SS_ERROR_NoRegData_Msg});
         }
-        else {
-            if ( typeof cb == 'function' ) cb(reply);
-        }
-    });
+    }
+    else {
+        ins.CallXrpc(ucmma, 'eiNearBy', [EiMMA, SToken], null, null, function(result){
+            //console.log('xrpc nearby result=%s', JSON.stringify(result));
+            if ( typeof cb == 'function' ){
+                if ( !result.ErrCode )
+                    cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":result});
+                else
+                    cb(result);
+            }
+        });
+    }
 }
 
 var SearchEi = function(EiMMA, SToken, Key, cb){
@@ -1340,7 +1561,7 @@ var NewSessionInfo = function(){
     "EiUDID":"","EiMMA":"","WIP":"","LIP":"","DDN":"","AppId":"","State":"",
     "EiOwner":"","EiName":"","EiType":"","EiTag":"","EiLoc":"",
     "UToken":"","Uid":"","UserName":"","MobileNo":"","NickName":"","Sex":"","EmailVerified":false,"MobileVerified":false,
-    "TimeStamp":new Date()};
+    "TimeStamp":new Date(),"Polled":false};
     return info;
 }
 
@@ -1362,7 +1583,7 @@ var AddSessionInfo = function(AppKey, EiUMMA, EiUPort, WIP, LIP, ei, cb){
     reginfo.WIP = WIP;
     reginfo.LIP = LIP;
     if ( sdbg >= 1 ) console.log('AddSessionInfo EiUMMA=%s,WIP=%s,LIP=%s', EiUMMA, WIP, LIP);
-    if ( sdbg >= 1 ) console.log('AddSessionInfo ix=%d,ei=%s', ix, JSON.stringify(ei));
+    if ( sdbg >= 2 ) console.log('AddSessionInfo ix=%d,ei=%s', ix, JSON.stringify(ei));
     reginfo.EiToken = ei.EiToken;
     reginfo.SToken = ei.SToken;
     //reginfo.UToken = ei.UToken;
@@ -1370,20 +1591,20 @@ var AddSessionInfo = function(AppKey, EiUMMA, EiUPort, WIP, LIP, ei, cb){
     reginfo.EiMMA = ei.EiMMA;
     reginfo.DDN = ei.DDN;
     reginfo.AppId = ei.AppId;
-    if ( typeof ei.EdgeInfo == 'object' && ei.EdgeInfo != null ){
+    if ( ei.EdgeInfo ){
         reginfo.EiOwner = ei.EdgeInfo.EiOwner ? ei.EdgeInfo.EiOwner : '';
         reginfo.EiName = ei.EdgeInfo.EiName ? ei.EdgeInfo.EiName : '';
         reginfo.EiType = ei.EdgeInfo.EiType ? ei.EdgeInfo.EiType : '';
         reginfo.EiTag = ei.EdgeInfo.EiTag ? ei.EdgeInfo.EiTag : '';
         reginfo.EiLoc = ei.EdgeInfo.EiLoc ? ei.EdgeInfo.EiLoc : '';
     }
-    if ( typeof ei.UserInfo == 'object' && ei.UserInfo != null ){
+    if ( ei.UserInfo ){
         reginfo.UToken = ei.UserInfo.UToken ? ei.UserInfo.UToken : '';
         reginfo.Uid = ei.UserInfo.Uid ? ei.UserInfo.Uid : '';
         reginfo.UserName = ei.UserInfo.UserName ? ei.UserInfo.UserName : '';
         reginfo.MobileNo = ei.UserInfo.MobileNo ? ei.UserInfo.MobileNo : '';
         reginfo.NickName = ei.UserInfo.NickName ? ei.UserInfo.NickName : '';
-        reginfo.Sex = ei.UserInfo.Sex ? ei.UserInfo.Sex : '';
+        //reginfo.Sex = ei.UserInfo.Sex ? ei.UserInfo.Sex : '';
         reginfo.EmailVerified = ei.UserInfo.EmailVerified ? ei.UserInfo.EmailVerified : false;
         reginfo.MobileVerified = ei.UserInfo.MobileVerified ? ei.UserInfo.MobileVerified : false;
     }
@@ -1394,19 +1615,93 @@ var AddSessionInfo = function(AppKey, EiUMMA, EiUPort, WIP, LIP, ei, cb){
     //console.log('--##AddSessionInfo regtable=%s', JSON.stringify(regtable));
 }
 
+var AddLocalSessionInfo = function( from, conf, cb ){
+    var SToken = conf.SToken ? conf.SToken : '';
+    var reginfo;
+    var ix = -1;
+    if ( SToken ){
+        ix = GetSessionInfo( SToken );
+        if ( ix < 0 ) {
+            reginfo = NewSessionInfo();
+            FillLocalSession(from, reginfo, conf);
+            console.log('AddLocalSessionInfo: reginfo=%s', JSON.stringify(reginfo));
+        }
+        else {
+            reginfo = regtable[ix];
+        }
+    }
+    else {
+        reginfo = NewSessionInfo( SToken );
+        FillLocalSession(from, reginfo, conf);
+        console.log('AddLocalSessionInfo: reginfo=%s', JSON.stringify(reginfo));
+    }
+    reginfo.State = 'reg';
+    if ( ix < 0 ) regtable.push(reginfo);
+    if ( typeof cb == 'function' ) cb({"ErrCode":err.SS_OKCODE,"ErrMsg":err.SS_OKMSG,"result":reginfo});
+}
+
+var FillLocalSession = function(from, info, conf){
+    console.log('FillLocalSession: info=%s', JSON.stringify(info));
+    console.log('FillLocalSession: conf=%s', JSON.stringify(conf));
+    info.AppKey = (conf.AppKey) ? conf.AppKey : '';
+    info.DDN = TokenGen('ddn');
+    info.SToken = (conf.SToken) ? conf.SToken : TokenGen('stoken');
+    info.EiToken = (conf.EiToken) ? conf.EiToken : info.SToken;
+    info.EiUMMA = (conf.EiUMMA) ? conf.EiUMMA : '';
+    info.EiUPort = (conf.EiUPort) ? conf.EiUPort : '';
+    info.WIP = (conf.WIP) ? conf.WIP : '';
+    info.LIP = (conf.LIP) ? conf.LIP : '';
+    info.EiMMA = ( from ) ? from : '';
+    if ( conf.EiInfo ){
+        info.EiName = (conf.EiInfo.EiName) ? conf.EiInfo.EiName : '';
+        info.EiType = (conf.EiInfo.EiType) ? conf.EiInfo.EiType : '';
+        info.EiTag = (conf.EiInfo.EiName) ? conf.EiInfo.EiTag : '';
+        info.EiLoc = (conf.EiInfo.EiLoc) ? conf.EiInfo.EiLoc : '';
+    }
+};
+
+var TokenGen = function(mtype){
+    switch(mtype){
+        case 'ddn':
+            ret = '*' + ins.CreateTicket(7);
+            break;
+        case 'stoken':
+        case 'eitoken':
+            ret = '$' + ins.CreateTicket(7);
+            break;
+        default:
+            break;
+    }
+    return ret;
+}
+
+
 var AddDeviceInfo = function(stoken, devinfo){
     //console.log('AddInfo: reginfo=%s', JSON.stringify(reginfo));
     if ( stoken != '' ){
         var ix = GetSessionInfo(stoken);
         if ( ix >= 0 ){
-            regtable[ix].EiOwner = devinfo.EiOwner;
-            regtable[ix].EiName = devinfo.EiName;
-            regtable[ix].EiType = devinfo.EiType;
-            regtable[ix].EiTag = devinfo.EiTag;
-            regtable[ix].EiLoc = devinfo.EiLoc;
+            regtable[ix].EiOwner = (devinfo.EiOwner) ? devinfo.EiOwner : '';
+            regtable[ix].EiName = (devinfo.EiName) ? devinfo.EiName : '';
+            regtable[ix].EiType = (devinfo.EiType) ? devinfo.EiType : '';
+            regtable[ix].EiTag = (devinfo.EiTag) ? devinfo.EiTag : '';
+            regtable[ix].EiLoc = (devinfo.EiLoc) ? devinfo.EiLoc : '';
+            console.log('AddDeviceInfo: regtable[%d]=%s', ix, JSON.stringify(regtable[ix]));
         }
         if ( sdbg >= 2 ) console.log('AddDeviceInfo: regtable=%s', JSON.stringify(regtable));
     }    
+}
+
+var GetDeviceInfo = function(stoken){
+    var ret = null;
+    if ( stoken ){
+        var ix = GetSessionInfo(stoken);
+        if ( ix >= 0 ){
+            var inf = regtable[ix];
+            ret = {"EiOwner":inf.EiOwner,"EiName":inf.EiName,"EiType":inf.EiType,"EiTag":inf.EiTag,"EiLoc":inf.EoLoc};
+        }
+    }
+    return ret;
 }
 
 var RmSessionInfo = function(skey){
@@ -1675,7 +1970,7 @@ var GetSessionInfoByMMA = function(EiUMMA, cb){
         for ( var i = 0; i < regtable.length; i++ ){
             //console.log('GetSessionInfoByMMA regitem=%s', JSON.stringify(regtable[i]));
             if ( EiUMMA == regtable[i].EiUMMA ){
-                var ss = {"EiMMA":regtable[i].EiMMA,"SToken":regtable[i].SToken};
+                var ss = {"EiMMA":regtable[i].EiMMA,"SToken":regtable[i].SToken,"Index":i};
                 retss.push(ss);
             }
         }
@@ -1694,23 +1989,27 @@ var StartWatchDog = function(){
 var WatchIdleSession = function(){
     //console.log('WatchIdleSession');
     if ( regtable.length > 0 ){
-        var diff, ts, nt;
-        var EiMMA, SToken;
+        var diff, ts, nt, poll;
+        var reginfo, EiMMA, SToken;
         for ( var i = 0; i < regtable.length; i++ ){
             //console.log('WatchIdleSession scan edge=%s', JSON.stringify(regtable[i]));
-            ts = regtable[i].TimeStamp;
-            nt = new Date();
-            diff = nt - ts; 
-            if ( diff > idleTimeout ){
-                //console.log('WatchIdleSession elapse edge=%s', regtable[i].EiMMA);
-                SToken = regtable[i].SToken;
-                EiMMA = regtable[i].EiMMA;
-                EndSession(EiMMA, SToken, 'Timeout', function(result){
-                    //console.log('WatchIdleSession:EndSession SToken=%s result=%s',SToken, JSON.stringify(result));
-                });
+            reginfo = regtable[i];
+            poll = reginfo.Polled;
+            ts = reginfo.TimeStamp;
+            if ( poll && ts ){
+                nt = new Date();
+                diff = nt - ts; 
+                if ( diff > idleTimeout ){
+                    //console.log('WatchIdleSession elapse edge=%s', regtable[i].EiMMA);
+                    SToken = reginfo.SToken;
+                    EiMMA = reginfo.EiMMA;
+                    EndSession(EiMMA, SToken, 'Timeout', function(result){
+                        console.log('WatchIdleSession:EndSession SToken=%s result=%s',SToken, JSON.stringify(result));
+                    });
+                }
             }
         }
-        if ( sdbg >= 1 ) console.log('WatchIdleSession fwdq=%d', fwdq.length);
+        if ( sdbg >= 2 ) console.log('WatchIdleSession fwdq=%d', fwdq.length);
     }
 }
 
