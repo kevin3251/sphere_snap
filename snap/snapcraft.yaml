@@ -1,5 +1,5 @@
 name: sphere  
-version: '0.1.4'
+version: '0.1.5'
 summary: The motechat sphere system
 description: |
   The base compoment for motechat.
