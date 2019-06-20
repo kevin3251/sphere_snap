@@ -6,7 +6,7 @@
     "MotebusPort":6161,
     "UplinkDC":"",
     "Log":false,
-    "Isolated":true,
+    "Isolated":false,
     "Heartbeat":180,
     "HBCenter":"ioc@ioc.ypcloud.com:6789"
 }
